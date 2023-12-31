@@ -12,6 +12,7 @@
 
 #define VERSION_STRING "0.0.1"
 
+static int request_id = 1;
 
 struct options {
   std::string socket_path;
@@ -24,6 +25,8 @@ std::mutex pending_lock;
 
 int parse_opts(options& options, int argc, char* argv[]);
 int interactive_loop(int sock, int start_id, std::istream& in);
+
+int wm_pres[3] = {0, 0, 0};
 
 int add_pending(int id) {
   std::lock_guard<std::mutex> guard(pending_lock);
@@ -41,13 +44,14 @@ int remove_pending(int id) {
   return -1;
 }
 
-int handle_message(oscpkt::Message* msg, oscpkt::Message::ArgReader* arg, int id);
+int handle_message(int fd, oscpkt::Message* msg, oscpkt::Message::ArgReader* arg, int id);
 
 int osc_msg(int fd, const std::string& path, int id, const std::string& argtypes, ...) {
   oscpkt::PacketWriter pw;
   oscpkt::Message msg;
   msg.init(path);
   msg.pushInt32(id);
+
   if (!argtypes.empty()) {
     va_list arglist;
     va_start(arglist, argtypes);
@@ -107,7 +111,7 @@ int socket_read_loop(int fd) {
         arg.popInt32(resp_id);
         if (msg->match("/done"))
           remove_pending(resp_id);
-        handle_message(msg, &arg, resp_id);
+        handle_message(fd, msg, &arg, resp_id);
       }
     }
   }
@@ -155,7 +159,6 @@ int main(int argc, char* argv[]) {
   reader->detach();
   delete reader;
 
-  int request_id = 1;
   std::cout << "Listening for plug events and slot events..." << std::endl;
   osc_msg(sock, "/listen", request_id++, "sb", "plug", true);
   osc_msg(sock, "/listen", request_id++, "sb", "slot", true);
@@ -167,16 +170,25 @@ int main(int argc, char* argv[]) {
   if (options.interactive)
     interactive_loop(sock, request_id, std::cin);
 
+  while (1)
+  {
+    //verifico che esista un wiimote
+
+    sleep(5);
+  }
+
+
   while (true) {
     std::lock_guard<std::mutex> guard(pending_lock);
     if (pending_requests.size() == 0)
-      break;
+      sleep(1);
   }
+  
   close(sock);
   exit(retcode);
 }
 
-int handle_message(oscpkt::Message* msg, oscpkt::Message::ArgReader* arg, int id) {
+int handle_message(int sock, oscpkt::Message* msg, oscpkt::Message::ArgReader* arg, int id) {
   if (msg->match("/text")) {
     std::string text;
     arg->popStr(text);
@@ -196,6 +208,73 @@ int handle_message(oscpkt::Message* msg, oscpkt::Message::ArgReader* arg, int id
       std::cerr << ")";
     }
     std::cerr << std::endl;
+  } else if ( msg->match("/devplug") ) {
+    std::string dev_name, dev_action;
+    int dev_idx;
+
+    dev_idx = 0;
+    arg->popStr(dev_name);
+    arg->popStr(dev_action);
+
+    //estrazione dispositivo
+    if ( dev_name == "wm1" ) dev_idx = 1;
+    else if ( dev_name == "wm2" ) dev_idx = 2;
+    else return;
+
+    //estrazione azione
+    //if ( dev_action == "remove" )
+  } else if ( msg->match("/devslot") ) {
+    int contr_id;
+    char ir_x_msg[200];
+    char ir_y_msg[200];
+    char btn_lx_msg[200];
+    char btn_rx_msg[200];
+    std::string dev_name, dev_slot;
+    
+    contr_id = 0;
+    arg->popStr(dev_name);
+    arg->popStr(dev_slot);
+    
+    std::cout << "Rilevato " << dev_name << " su slot " << dev_slot << std::endl;
+
+    if (dev_name == "wm1" ) 
+    {
+      std::cout << "Controller 1" << std::endl;
+      contr_id = 1;
+    }
+    else if (dev_name == "wm2")
+    {
+      std::cout << "Controller 2" << std::endl;
+      contr_id = 2;
+    }
+    
+    if ( contr_id > 0 )
+    {
+      memset(ir_x_msg, 0, 200); 
+      memset(ir_y_msg, 0, 200);
+      memset(btn_lx_msg, 0, 200);
+      memset(btn_rx_msg, 0, 200);
+
+      wm_pres[contr_id] = 1;
+
+      //eventi ir
+      sprintf(ir_x_msg, "wm%d.wm_ir_x=redirect(left_x,keyboard%d)", contr_id, contr_id);
+      //std::cout << ir_x_msg << std::endl;
+      sprintf(ir_y_msg, "wm%d.wm_ir_y=redirect(left_y,keyboard%d)", contr_id, contr_id);
+      //std::cout << ir_y_msg << std::endl;
+      //eventi mouse
+      sprintf(btn_lx_msg, "wm%d.wm_b=redirect(btn_left,keyboard%d)", contr_id, contr_id);
+      //std::cout << btn_lx_msg << std::endl;
+      sprintf(btn_rx_msg, "wm%d.wm_a=redirect(btn_right,keyboard%d)", contr_id, contr_id);
+      //std::cout << btn_rx_msg << std::endl;
+      
+      //invio
+      osc_msg(sock, "/eval", request_id++, "s", ir_x_msg);
+      osc_msg(sock, "/eval", request_id++, "s", ir_y_msg);
+      osc_msg(sock, "/eval", request_id++, "s", btn_lx_msg);
+      osc_msg(sock, "/eval", request_id++, "s", btn_rx_msg);
+    }
+
   } else {
     //a generic catch-all to print something to the user.
     std::cout << msg->addressPattern() << ": ";
