@@ -44,7 +44,7 @@ int remove_pending(int id) {
   return -1;
 }
 
-int handle_message(int fd, oscpkt::Message* msg, oscpkt::Message::ArgReader* arg, int id);
+void handle_message(int fd, oscpkt::Message* msg, oscpkt::Message::ArgReader* arg, int id);
 
 int osc_msg(int fd, const std::string& path, int id, const std::string& argtypes, ...) {
   oscpkt::PacketWriter pw;
@@ -188,7 +188,7 @@ int main(int argc, char* argv[]) {
   exit(retcode);
 }
 
-int handle_message(int sock, oscpkt::Message* msg, oscpkt::Message::ArgReader* arg, int id) {
+void handle_message(int sock, oscpkt::Message* msg, oscpkt::Message::ArgReader* arg, int id) {
   if (msg->match("/text")) {
     std::string text;
     arg->popStr(text);
